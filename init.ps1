@@ -1,38 +1,57 @@
-$global:PwsRoot = Join-Path $HOME "pws-down"
-$configFile = Join-Path $global:PwsRoot "config/settings.json"
+# ==========================================
+# INICIALIZACIÓN DE PWS-DOWN (Ultra-Fast)
+# ==========================================
+$global:PwsRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$global:PwsConfigFile = Join-Path $global:PwsRoot "config\settings.json"
 
-# 1. Cargar Configuración
-if (Test-Path $configFile) {
-    $global:PwsConfig = Get-Content $configFile | ConvertFrom-Json
+# 1. Cargar configuración JSON en memoria
+if (Test-Path $global:PwsConfigFile) {
+    $global:PwsConfig = Get-Content $global:PwsConfigFile -Raw | ConvertFrom-Json
 } else {
-    # Valores por defecto si no existe el JSON
-    $global:PwsConfig = [PSCustomObject]@{
-        Layout = @("time", "duration", "path", "git")
-        Enabled = $true
-    }
+    Write-Warning "pws-down: No se encontró settings.json."
+    return
 }
 
-# 2. Cargar Módulos (Dot-Sourcing)
-# Esto carga las funciones en memoria una sola vez al abrir la terminal
-Get-ChildItem (Join-Path $global:PwsRoot "modules/*.ps1") | ForEach-Object { . $_.FullName }
+# 2. Cargar Módulos y Controlador
+Get-ChildItem (Join-Path $global:PwsRoot "modules\*.ps1") | ForEach-Object { . $_.FullName }
+. (Join-Path $global:PwsRoot "controller.ps1")
 
-# 3. Función Prompt Dinámica
+# ---------------------------------------------------------
+# 🔥 NUEVO: PRE-COMPILACIÓN DEL PLAN DE EJECUCIÓN
+# ---------------------------------------------------------
+# Buscamos las funciones UNA SOLA VEZ en el arranque.
+$global:PwsExecutionPlan = @()
+
+foreach ($moduleName in $global:PwsConfig.Layout) {
+    $functionName = "Get-Pws$moduleName"
+    # Si la función existe, guardamos su referencia directa en memoria
+    if (Test-Path "Function:\$functionName") {
+        $global:PwsExecutionPlan += (Get-Item "Function:\$functionName")
+    }
+}
+# ---------------------------------------------------------
+
+# 3. El Prompt Principal (Latencia Cero)
 function prompt {
-    $lastStatus = $?
+    $lastCommandSuccess = $?
+    $e = [char]27
     $promptString = ""
 
     if ($global:PwsConfig.Enabled) {
-        # Recorre el layout definido en el JSON
-        foreach ($moduleName in $global:PwsConfig.Layout) {
-            # Busca y ejecuta la función correspondiente (ej: Get-PwsTime)
-            $functionName = "Get-Pws$moduleName"
-            if (Get-Command $functionName -ErrorAction SilentlyContinue) {
-                $promptString += & $functionName
-            }
+        # Ejecutamos las referencias directas de la RAM, sin buscar comandos.
+        foreach ($func in $global:PwsExecutionPlan) {
+            $promptString += & $func
         }
+    } else {
+        $promptString = "$e[90m[$([System.DateTime]::Now.ToString("HH:mm:ss"))]$e[0m $e[96m$($PWD.ProviderPath)$e[0m "
     }
 
-    # Bloque Identificable (Final)
-    $indicator = if ($lastStatus) { "`e[95m>>`e[0m" } else { "`e[91m✘ >>`e[0m" }
-    return "$promptString`n$indicator "
+    # Bloque Identificable Fijo
+    $indicatorStr = if ($lastCommandSuccess) { 
+        "$e[95m$($global:PwsConfig.Symbols.indicator)$e[0m" 
+    } else { 
+        "$e[91m$($global:PwsConfig.Symbols.error)$e[0m" 
+    }
+    
+    return "$promptString`n$indicatorStr "
 }
