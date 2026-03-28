@@ -3,9 +3,8 @@
   "Layout": [
     "Time",
     "Duration",
-    "Software",
     "Path",
-    "Git"
+    "Git",
   ],
   "Symbols": {
     "indicator": "❯❯",
