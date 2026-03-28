@@ -6,9 +6,9 @@ Su objetivo es ofrecer un prompt rico en información (Git, tiempos de ejecució
 
 ## ✨ Características Principales
 
-  * **Ultra Rápido:** Sin parpadeos ni lag al presionar `Enter`.
+  * **Ultra Rápido (Pre-compilado):** Utiliza un plan de ejecución en memoria RAM. No busca comandos ni evalúa el sistema al presionar `Enter`; solo dispara funciones ya cargadas para garantizar latencia 0ms.
   * **Diseño Modular:** Cada funcionalidad vive en su propio archivo (`.ps1`). Si un módulo se rompe, el resto del prompt sigue funcionando de manera independiente.
-  * **Configurable al Vuelo:** Cambia el orden, activa o desactiva módulos instantáneamente mediante un archivo `settings.json` sin necesidad de tocar el código base.
+  * **Configurable al Vuelo:** Cambia el orden, activa o desactiva módulos instantáneamente mediante comandos o el archivo `settings.json` sin necesidad de tocar el código base.
   * **Cero Ejecutables:** Lee el archivo `.git/HEAD` directamente como texto para inferir la rama y consulta el Registro para las versiones de software.
 
 ## 🚀 Instalación
@@ -26,20 +26,19 @@ Su objetivo es ofrecer un prompt rico en información (Git, tiempos de ejecució
 
 ## 🛠️ Uso y Comandos
 
-El controlador principal del entorno es el comando `pws`. Puedes usarlo para gestionar el estado y la cantidad de información de tu terminal en tiempo real:
+El controlador principal del entorno está integrado nativamente y se invoca con el comando `pws`. Puedes usarlo para gestionar el estado y la cantidad de información de tu terminal en tiempo real:
 
   * `pws --activate` : Enciende el motor de `pws-down`.
   * `pws --disable` : Apaga el motor y vuelve a un prompt básico de emergencia.
-  * `pws --minimal` : Cambia el layout a una versión reducida (ideal para concentrarse, oculta hora y software).
-  * `pws --full` : Activa todos los módulos visuales definidos en tu configuración.
+  * `pws --minimal` : Cambia el layout a una versión reducida (ideal para concentrarse, oculta hora y software) y recompila el prompt al instante.
+  * `pws --full` : Activa todos los módulos visuales definidos en tu configuración y recompila el prompt.
   * `pws --update` : Escanea el sistema de forma silenciosa para actualizar la caché de versiones de software instaladas.
 
 ## 🧩 Estructura del Proyecto
 
 ```text
 pws-down/
-├── init.ps1           # Cargador principal. Hace el dot-sourcing de los módulos.
-├── controller.ps1     # Lógica del comando de gestión manual 'pws'.
+├── init.ps1           # Motor central: Cargador, Controlador ('pws') y Prompt pre-compilado.
 ├── config/
 │   └── settings.json  # Define el orden (Layout), símbolos y estado de los módulos.
 └── modules/           # Directorio de funcionalidades aisladas.
@@ -61,5 +60,5 @@ La ventaja de la arquitectura de `pws-down` es que añadir nueva información al
         return "`e[92m🔋 100%`e[0m "
     }
     ```
-3.  Abre `config/settings.json` y añade `"Bateria"` (el nombre sin el prefijo) al arreglo `"Layout"` en la posición exacta donde quieras que aparezca.
-4.  Abre una nueva terminal. El motor detectará e inyectará tu nuevo módulo automáticamente.
+3.  Abre `config/settings.json` y añade `"Bateria"` (el nombre exacto sin el prefijo `Get-Pws`) al arreglo `"Layout"` en la posición donde quieras que aparezca.
+4.  Abre una nueva terminal (o ejecuta `pws --full`). El motor detectará, compilará e inyectará tu nuevo módulo automáticamente en el plan de ejecución.
