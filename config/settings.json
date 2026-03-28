@@ -1,10 +1,18 @@
 {
-    "Enabled": true,
-    "Layout": [
-        "time",
-        "duration",
-        "software",
-        "path",
-        "git"
-    ]
+  "Enabled": true,
+  "Layout": [
+    "Time",
+    "Duration",
+    "Software",
+    "Path",
+    "Git"
+  ],
+  "Symbols": {
+    "indicator": "❯❯",
+    "error": "✘ ❯❯"
+  },
+  "SoftwareCache": {
+    "Python": null,
+    "Cpp": null
+  }
 }
