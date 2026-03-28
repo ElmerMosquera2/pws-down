@@ -12,33 +12,74 @@ if (Test-Path $global:PwsConfigFile) {
     return
 }
 
-# 2. Cargar Módulos y Controlador
+# 2. Cargar Módulos de la carpeta (Dot-Sourcing)
 Get-ChildItem (Join-Path $global:PwsRoot "modules\*.ps1") | ForEach-Object { . $_.FullName }
-. (Join-Path $global:PwsRoot "controller.ps1")
 
 # ---------------------------------------------------------
-# 🔥 NUEVO: PRE-COMPILACIÓN DEL PLAN DE EJECUCIÓN
+# 3. CONTROLADOR INTEGRADO (El comando 'pws')
 # ---------------------------------------------------------
-# Buscamos las funciones UNA SOLA VEZ en el arranque.
-$global:PwsExecutionPlan = @()
+function pws {
+    param(
+        [switch]$activate, [switch]$disable, 
+        [switch]$minimal, [switch]$full, [switch]$update
+    )
+    
+    $saveRequired = $false
+    $rebuildPlan = $false
 
-foreach ($moduleName in $global:PwsConfig.Layout) {
-    $functionName = "Get-Pws$moduleName"
-    # Si la función existe, guardamos su referencia directa en memoria
-    if (Test-Path "Function:\$functionName") {
-        $global:PwsExecutionPlan += (Get-Item "Function:\$functionName")
+    if ($activate) { $global:PwsConfig.Enabled = $true; $saveRequired = $true; Write-Host "✅ pws-down activado." -ForegroundColor Cyan }
+    if ($disable) { $global:PwsConfig.Enabled = $false; $saveRequired = $true; Write-Host "🌑 pws-down desactivado." -ForegroundColor DarkGray }
+    
+    if ($minimal) { 
+        $global:PwsConfig.Layout = @("Path", "Git")
+        $saveRequired = $true; $rebuildPlan = $true
+        Write-Host "🧹 Modo minimalista activado." -ForegroundColor Yellow 
+    }
+    if ($full) { 
+        $global:PwsConfig.Layout = @("Time", "Duration", "Software", "Path", "Git")
+        $saveRequired = $true; $rebuildPlan = $true
+        Write-Host "✨ Modo completo activado." -ForegroundColor Yellow 
+    }
+    
+    if ($update) {
+        Write-Host "🔄 Escaneando Registro (Nativo)..." -ForegroundColor Cyan
+        $pyPath = "HKCU:\Software\Python\PythonCore"
+        if (Test-Path $pyPath) {
+            $global:PwsConfig.SoftwareCache.Python = (Get-ChildItem $pyPath | Select-Object -ExpandProperty PSChildName -First 1)
+            Write-Host "  ✅ Python detectado." -ForegroundColor Green
+        }
+        $saveRequired = $true
+    }
+
+    if ($rebuildPlan) { Update-PwsExecutionPlan }
+    if ($saveRequired) { $global:PwsConfig | ConvertTo-Json -Depth 3 | Out-File $global:PwsConfigFile -Encoding utf8 }
+}
+
+# ---------------------------------------------------------
+# 4. COMPILADOR DEL PLAN DE EJECUCIÓN (Para Latencia Cero)
+# ---------------------------------------------------------
+function Update-PwsExecutionPlan {
+    $global:PwsExecutionPlan = @()
+    foreach ($moduleName in $global:PwsConfig.Layout) {
+        $functionName = "Get-Pws$moduleName"
+        if (Test-Path "Function:\$functionName") {
+            $global:PwsExecutionPlan += (Get-Item "Function:\$functionName")
+        }
     }
 }
-# ---------------------------------------------------------
+# Compilamos por primera vez al arrancar
+Update-PwsExecutionPlan
 
-# 3. El Prompt Principal (Latencia Cero)
+# ---------------------------------------------------------
+# 5. EL PROMPT (Bucle Principal)
+# ---------------------------------------------------------
 function prompt {
     $lastCommandSuccess = $?
     $e = [char]27
     $promptString = ""
 
     if ($global:PwsConfig.Enabled) {
-        # Ejecutamos las referencias directas de la RAM, sin buscar comandos.
+        # Ejecución directa desde la memoria RAM pre-compilada
         foreach ($func in $global:PwsExecutionPlan) {
             $promptString += & $func
         }
