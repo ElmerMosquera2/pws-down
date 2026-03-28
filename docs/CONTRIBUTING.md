@@ -1,38 +1,205 @@
-# 🤝 Guía de Contribución para PWS
+# 🤝 Guía de Contribución para PWS-DOWN
 
-¡Hola! Qué excelente que quieras sumar tu código a este proyecto. PWS está diseñado para ser la herramienta definitiva para la terminal de PowerShell, y toda ayuda para hacerla más poderosa y "ostentosa" es bienvenida.
+¡Hola! Qué excelente que quieras sumar tu código a este proyecto. **PWS-DOWN** está diseñado para ser la capa de personalización definitiva para PowerShell, siguiendo principios de arquitectura modular y latencia cero. Toda ayuda para hacerla más rápida y elegante es bienvenida.
 
-## 🧠 El Paradigma Principal: La Regla de los 0ms
+---
 
-Al igual que cuando optimizas el manejo de memoria, los punteros o las operaciones a nivel de bits en proyectos críticos de C++, en PWS tenemos una regla de oro inquebrantable: **La función del `prompt` no puede tener lag.**
+## 🏛️ Arquitectura y Filosofía
 
-Cualquier característica nueva que propongas debe renderizarse en 0ms.
+### El Principio Fundamental: Latencia Cero en el Prompt
 
-* ❌ **Prohibido:** Invocar ejecutables externos (ej. `git.exe`, `python`, `node`, `npm`) directamente dentro de la función `prompt`. Esto genera cuellos de botella.
-* ✅ **Permitido:** Utilizar clases nativas de .NET (`[System.IO.File]`), secuencias de escape ANSI directas y lectura de variables globales en la memoria RAM. 
-* 💡 **El Truco:** Si necesitas consultar información externa (como la versión de un lenguaje o el estado de un contenedor), debes agregar esa lógica a la función controladora `pws` para que se guarde en la caché (`~/.pws_config.json`) y el prompt simplemente lea el resultado almacenado.
+La función `prompt` es el corazón de la experiencia. Cada milisegundo cuenta. **No puede haber lag.**
+
+- ❌ **Prohibido:** Invocar ejecutables externos (`git.exe`, `python.exe`, `node.exe`) dentro de `prompt`.
+- ❌ **Prohibido:** Consultas lentas (WMI/CIM sin caché, lectura de archivos grandes).
+- ✅ **Permitido:** Clases nativas .NET (`[System.IO.File]::ReadAllText()`), secuencias ANSI directas, lectura de variables globales en RAM.
+- 💡 **El Truco:** Si necesitas información externa, créala en el comando `pws` y almacénala en caché. El `prompt` solo lee de memoria.
+
+### La Regla Modular: Cada Funcionalidad en su Archivo
+
+```text
+pws-down/
+├── init.ps1           # Solo orquestador (no lógica)
+├── config/
+│   └── settings.json  # Layout y configuración
+└── modules/           # Un archivo por funcionalidad
+    ├── time.ps1       # Get-PwsTime
+    ├── duration.ps1   # Get-PwsDuration
+    ├── path.ps1       # Get-PwsPath
+    ├── git.ps1        # Get-PwsGit
+    └── software.ps1   # Get-PwsSoftware
+```
+
+**Contrato del Módulo:**
+- Nombre: `modules/<nombre>.ps1`
+- Función: `Get-Pws<Nombre>` (exactamente igual al archivo)
+- Retorno: `[string]` con formato ANSI o `""` si no hay datos
+- Latencia: Cada función debe ejecutarse en <1ms
+
+---
+
+## 📝 Estándares de Código
+
+### Commits: Conventional Commits
+
+Usa [Conventional Commits](https://www.conventionalcommits.org/es/v1.0.0/):
+
+```bash
+feat(battery): add real battery level module with 5s cache
+fix(git): resolve error when HEAD file doesn't exist
+refactor(init): optimize execution plan with typed list
+perf(duration): reduce overhead in command timing
+docs(contributing): update contribution guidelines
+```
+
+### Comandos Git Modernos
+
+En la documentación y ejemplos, usa los comandos modernos:
+
+```bash
+# ✅ Recomendado
+git switch feature/nueva-funcionalidad
+git switch -c feature/nueva-funcionalidad  # crear y cambiar
+git restore archivo.ps1
+git restore --staged archivo.ps1
+
+# ❌ Evitar (obsoleto)
+git checkout feature/nueva-funcionalidad
+git checkout -b feature/nueva-funcionalidad
+git checkout -- archivo.ps1
+git reset HEAD archivo.ps1
+```
+
+### PowerShell: Cmdlets Modernos
+
+```powershell
+# ✅ Recomendado (PowerShell 7+)
+Get-CimInstance -ClassName Win32_Battery
+Get-ChildItem -Filter *.ps1
+
+# ❌ Evitar (obsoleto o más lento)
+Get-WmiObject -Class Win32_Battery
+Get-ChildItem *.ps1  # sin -Filter es más lento
+```
+
+---
 
 ## 🐛 Reporte de Errores (Bugs)
 
-Si encuentras que PWS explota, muestra caracteres extraños o se desconfigura, por favor abre un *Issue* incluyendo:
-1. Tu sistema operativo y versión.
-2. Tu versión de PowerShell (ejecuta `$PSVersionTable.PSVersion`).
-3. El contenido actual de tu archivo de caché `~/.pws_config.json` (oculta cualquier ruta personal si es necesario).
-4. Los pasos exactos para reproducir el problema.
+Si encuentras problemas, abre un *Issue* con:
+
+1. **Sistema operativo** (Windows 10/11 específicamente)
+2. **Versión de PowerShell**: `$PSVersionTable.PSVersion`
+3. **Configuración actual**: `Get-Content $HOME\pws-down\config\settings.json`
+4. **Pasos para reproducir**
+5. **Comportamiento esperado vs real**
+
+---
 
 ## ✨ Sugerencia de Características (Features)
 
-¿Tienes una idea para detectar nuevas tecnologías (Docker, CMake, Rust, Node) o añadir un nuevo módulo visual? ¡Abre un *Issue* para discutirlo! Explica tu idea, cómo beneficiaría al flujo de trabajo y cómo planeas integrarla sin romper el paradigma de latencia cero.
+¿Tienes una idea para un nuevo módulo? Abre un *Issue* para discutir:
+
+- ¿Qué información mostraría?
+- ¿Cómo se obtiene sin ejecutables externos?
+- ¿Latencia estimada?
+- ¿Qué iconos/colores usaría?
+
+**Ejemplo de nuevo módulo:**
+```powershell
+# modules/docker.ps1
+function Get-PwsDocker {
+    # Lee de archivo de caché creado por 'pws --update'
+    if ($global:PwsConfig.Docker.Running) {
+        return "`e[92m🐳 $($global:PwsConfig.Docker.Containers)`e[0m"
+    }
+    return ""
+}
+```
+
+---
 
 ## 🛠️ Entorno de Desarrollo y Pull Requests
 
-Para enviar tu código, sigue estos pasos:
+### 1. Prepara tu entorno
+```powershell
+# Clona tu fork
+git clone https://github.com/tu-usuario/pws-down.git
+cd pws-down
 
-1. Haz un **Fork** del repositorio.
-2. Crea una rama descriptiva para tu cambio: `git checkout -b feature/soporte-nodejs` o `fix:correccion-regex-git`.
-3. Haz tus modificaciones y pruébalas localmente en tu propio archivo `$PROFILE`. 
-   > *Prueba de fuego:* Mantén presionada la tecla `Enter` en tu terminal. El texto debe fluir sin el más mínimo tartamudeo. Si la terminal parpadea o se congela, el código necesita más optimización.
-4. Haz **Commit** de tus cambios usando [Conventional Commits](https://www.conventionalcommits.org/es/v1.0.0/) (ej. `feat: añade detección automática de Go`, `fix: resuelve error cuando la carpeta HEAD no existe`).
-5. Haz **Push** a tu rama y abre el **Pull Request**.
+# Crea una rama descriptiva
+git switch -c feature/nuevo-modulo
+```
 
-¡Gracias por ayudar a construir la terminal más rápida y elegante posible! 🚀
+### 2. Desarrolla tu módulo
+1. Crea `modules/tu-modulo.ps1`
+2. Implementa `Get-PwsTuModulo` siguiendo el contrato
+3. Prueba localmente:
+   ```powershell
+   . .\init.ps1
+   Get-PwsTuModulo  # prueba manual
+   ```
+
+### 3. La Prueba de Fuego
+```powershell
+# Mantén presionada la tecla Enter
+# El prompt debe fluir sin tartamudeo
+# Si ves parpadeos o congelamiento, necesita optimización
+```
+
+### 4. Actualiza configuración (opcional)
+Si tu módulo debe aparecer por defecto:
+```json
+// config/settings.json
+{
+  "Layout": ["Time", "Duration", "Software", "Path", "Git", "TuModulo"]
+}
+```
+
+### 5. Commit y Push
+```bash
+git add modules/tu-modulo.ps1 config/settings.json
+git commit -m "feat(tu-modulo): add module for X functionality
+
+- Implement Get-PwsTuModulo with <1ms latency
+- Uses native .NET classes for zero-exe operation
+- Includes color-coded output and dynamic icons"
+
+git push origin feature/nuevo-modulo
+```
+
+### 6. Abre Pull Request
+- Describe tu cambio
+- Menciona si rompe compatibilidad
+- Adjunta captura de cómo se ve en el prompt
+
+---
+
+## 📊 Checklist para Nuevos Módulos
+
+Antes de enviar tu PR, verifica:
+
+- [ ] El módulo sigue la convención `modules/<nombre>.ps1` → `Get-Pws<Nombre>`
+- [ ] Latencia <1ms (o usa caché si es >1ms)
+- [ ] Zero-Exe: sin llamadas a `.exe` externos
+- [ ] Retorna `""` silenciosamente si no hay datos
+- [ ] Usa colores ANSI consistentes (verde=ok, amarillo=advertencia, rojo=crítico)
+- [ ] Documentación con `<# .SYNOPSIS .DESCRIPTION .NOTES #>`
+- [ ] Probado en Windows 10/11 con PowerShell 7+
+
+---
+
+## 🚀 Principios que Guían el Proyecto
+
+1. **Zero-Exe:** Nada de `git.exe`, `python.exe` en el prompt
+2. **Zero-Latency:** El prompt nunca debe esperar
+3. **Modular:** Un archivo por funcionalidad
+4. **Declarativo:** El layout se define en JSON, no en código
+5. **Pre-compilado:** Plan de ejecución en RAM al inicio
+6. **Windows 10/11+:** Enfocado en las versiones modernas
+7. **PowerShell 7+:** Aprovechando lo mejor del lenguaje
+
+---
+
+¡Gracias por ayudar a construir la terminal más rápida y elegante posible! 🚀⚡
+
