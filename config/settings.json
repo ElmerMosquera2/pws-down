@@ -1,0 +1,10 @@
+{
+    "Enabled": true,
+    "Layout": [
+        "time",
+        "duration",
+        "software",
+        "path",
+        "git"
+    ]
+}
