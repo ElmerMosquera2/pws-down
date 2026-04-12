@@ -1,12 +1,40 @@
-# 🛠️ Arquitectura Modular: pws-down
-
-Este documento describe la estructura y el flujo de ejecución de **pws-down**, una capa de personalización para PowerShell (Pwsh) optimizada para **latencia cero** y **extensibilidad modular**.
+# 🛠️ Arquitectura Modular: pws-down — Edición Mejorada
 
 ## 1. Filosofía de Diseño
-* **Zero-Exe:** Evitar la llamada a archivos `.exe` externos (como `git.exe` o `python.exe`) durante la renderización del prompt para eliminar el lag.
-* **Pre-compilación en memoria:** El orden de los elementos del prompt se compila en un "Plan de Ejecución" durante el arranque de la terminal. El bucle principal solo dispara referencias directas en RAM, evitando la búsqueda de comandos con cada 'Enter'.
-* **Aislamiento de Lógica:** Cada funcionalidad (hora, rama git, versión de software) reside en su propio archivo independiente.
-* **Layout Declarativo:** El orden y la visibilidad de los elementos se definen en un archivo de configuración, no en el código del prompt.
+
+La arquitectura se sostiene sobre los cuatro pilares originales, reforzados con cuatro nuevas reglas que eliminan tensiones internas de rendimiento.
+
+**Pilares Originales**
+
+* **Zero-Exe:** Evitar la llamada a archivos `.exe` externos durante la renderización del prompt.
+* **Pre-compilación en memoria:** El Plan de Ejecución se construye una sola vez en el arranque.
+* **Aislamiento de Lógica:** Cada funcionalidad reside en su propio archivo independiente.
+* **Layout Declarativo:** El orden visual se define en configuración, no en código del prompt.
+
+**Nuevas Reglas Filosóficas**
+
+**Regla 1 — Dos Clases de Módulos**
+
+* **Síncronos:** datos que cambian con cada comando (hora, path, git). Viven en el plan de ejecución principal.
+* **Snapshot:** datos que cambian raramente (versiones de software, batería). Se actualizan en un runspace paralelo al arranque y escriben a variables globales pre-inicializadas. El prompt solo lee esa variable; nunca bloquea.
+
+**Regla 2 — JSON es Fuente de Verdad en Frío**
+
+`settings.json` se lee exactamente una vez: en el arranque. Después, el estado vive exclusivamente en memoria como un objeto tipado `[PSCustomObject]`. Guardar en disco es una operación de persistencia explícita, nunca parte del ciclo de recompilación.
+
+**Regla 3 — El Prompt Escribe, No Construye**
+
+Concatenar strings con `+=` genera N objetos intermedios en memoria en cada keypress. El plan de ejecución almacena scriptblocks que escriben directamente a un `StringBuilder`. Un solo objeto mutable, cero allocations intermedias.
+
+```powershell
+$sb = [System.Text.StringBuilder]::new()
+foreach ($block in $global:PwsExecutionPlan) { [void]$sb.Append((&$block)) }
+$sb.ToString()
+```
+
+**Regla 4 — Separación Dato / Presentación**
+
+Cada módulo retorna un objeto estructurado `{ Value; Style }`, no un string ANSI. Un renderer central aplica el color. Esto permite cambiar temas sin tocar lógica de negocio y reutilizar datos en modos alternativos.
 
 ---
 
@@ -14,86 +42,132 @@ Este documento describe la estructura y el flujo de ejecución de **pws-down**, 
 
 ```text
 pws-down/
-├── init.ps1           # Motor central: Cargador, Controlador 'pws' y Compilador del prompt.
+├── init.ps1                # Motor central: Cargador, Controlador y Compilador.
+├── renderer.ps1            # Nuevo: aplica estilos ANSI a objetos { Value; Style }.
 ├── config/
-│   └── settings.json  # Estado global y orden de los módulos (Layout).
-└── modules/           # Lógica pura de componentes.
-    ├── time.ps1       # Retorna [HH:mm:ss].
-    ├── duration.ps1   # Retorna latencia del último comando.
-    ├── path.ps1       # Retorna ruta actual formateada.
-    ├── git.ps1        # Retorna rama actual vía lectura de archivos .git.
-    └── software.ps1   # Retorna versiones desde el Registro de Windows.
+│   └── settings.json       # Fuente de verdad en frío. Solo se lee en Startup.
+└── modules/
+    ├── sync/               # Módulos síncronos — evaluados en cada prompt.
+    │   ├── time.ps1
+    │   ├── duration.ps1
+    │   ├── path.ps1
+    │   └── git.ps1         # Usa FileSystemWatcher en lugar de escalar el árbol.
+    └── snapshot/           # Módulos snapshot — actualizados en runspace paralelo.
+        ├── software.ps1
+        └── battery.ps1
 ```
 
 ---
 
 ## 3. Componentes del Sistema
 
-### A. El Motor Central (`init.ps1`)
-Es el corazón del sistema unificado. Realiza tres tareas principales:
-1. **Dot-Sourcing:** Carga los scripts de `modules/` en memoria.
-2. **Controlador:** Aloja la función `pws` para la interacción manual del usuario.
-3. **Prompt:** Define el símbolo del sistema que el usuario ve.
+### A. Motor Central (`init.ps1`)
 
-### B. El Motor de Layout (`settings.json`)
-Controla qué se muestra y en qué orden.
+Ahora realiza cuatro tareas en el arranque:
+
+1. **Dot-Sourcing:** Carga los scripts de `modules/` en memoria.
+2. **Estado en memoria:** Deserializa `settings.json` a un `[PSCustomObject]` global. El archivo no se toca más.
+3. **Compilación del plan:** Construye `$global:PwsExecutionPlan` con scriptblocks de módulos síncronos.
+4. **Runspace paralelo:** Lanza los módulos snapshot en background; escriben a `$global:PwsSnapshot` al completar.
+
+### B. Motor de Layout (`settings.json`)
+
+Incluye ahora `SnapshotLayout` como sección separada:
+
 ```json
 {
   "Enabled": true,
   "Layout": ["Time", "Duration", "Path", "Git"],
-  "Symbols": { "indicator": "❯❯", "error": "✘ ❯❯" }
+  "SnapshotLayout": ["Software", "Battery"],
+  "Symbols": { "indicator": "❯❯", "error": "✘ ❯❯" },
+  "Theme": "default"
 }
 ```
 
-### C. El Plan de Ejecución (`$global:PwsExecutionPlan`)
-Es un array en memoria RAM que almacena objetos de tipo `FunctionInfo`. En lugar de buscar cómo se llama una función cada vez que el usuario presiona Enter, el sistema simplemente recorre este array y dispara los bloques de memoria pre-validados.
+### C. Plan de Ejecución (`$global:PwsExecutionPlan`)
 
-### D. Módulos Estándar (`modules/*.ps1`)
-Cada archivo debe exportar una función con el prefijo `Get-Pws`. 
-* **Contrato:** La función debe retornar un `[string]` (puede incluir secuencias de escape ANSI para color) o un string vacío si no hay datos que mostrar.
+Array en RAM que almacena **scriptblocks** (no `FunctionInfo`). Cada bloque escribe directamente al `StringBuilder` del renderer. Cero búsquedas de nombre, cero allocations intermedias.
+
+### D. Renderer Central (`renderer.ps1`)
+
+Nuevo componente. Recibe objetos `{ Value; Style }` de cada módulo y aplica las secuencias ANSI según el tema activo. El tema puede cambiarse en tiempo real sin modificar ningún módulo.
+
+### E. Módulos Síncronos (`modules/sync/*.ps1`)
+
+Contrato actualizado: cada función `Get-Pws*` retorna un `[PSCustomObject]` con las propiedades `Value` (string puro) y `Style` (identificador de estilo). Retorna `$null` si no hay datos que mostrar.
+
+### F. Módulo Git Mejorado (`modules/sync/git.ps1`)
+
+La detección de repositorio usa `FileSystemWatcher` sobre el directorio actual. Al cambiar de path, el watcher invalida la caché; el módulo no escala el árbol de directorios en cada prompt. Latencia garantizada < 0.1ms en prompts sucesivos dentro del mismo repo.
 
 ---
 
 ## 4. Flujo de Ejecución (Lifecycle)
 
-El ciclo de vida ahora está dividido en dos fases para garantizar máxima velocidad:
-
 ### Fase 1: Arranque (Startup)
-1. El perfil de PowerShell invoca a `init.ps1`.
-2. **Registro:** Se cargan las funciones de `modules/` en el scope global.
-3. **Compilación:** Se lee `settings.json` y se construye `$global:PwsExecutionPlan` validando qué funciones existen realmente.
 
-### Fase 2: Bucle del Prompt (Runtime - Latencia 0ms)
-Al presionar Enter:
-1. Se captura inmediatamente el éxito/error del comando anterior (`$?`).
-2. Se recorre el array `$global:PwsExecutionPlan` invocando cada función directamente desde la memoria RAM.
-3. **Bloque Identificable:** Se concatena el indicador final (`>>`) de forma independiente a los módulos.
-4. Se entrega el string final a la consola.
+1. El perfil de PowerShell invoca `init.ps1`.
+2. **Registro:** Funciones de `modules/` cargadas al scope global.
+3. **Estado:** `settings.json` deserializado a objeto en memoria. El archivo no se vuelve a leer.
+4. **Compilación:** Se construye `PwsExecutionPlan` con scriptblocks de módulos síncronos validados.
+5. **Runspace paralelo:** Módulos snapshot se lanzan en background y escriben a `$global:PwsSnapshot`.
+
+### Fase 2: Bucle del Prompt (Runtime — Latencia 0ms)
+
+1. Se captura inmediatamente `$?` del comando anterior.
+2. `StringBuilder` inicializado. Se recorre `PwsExecutionPlan`; cada bloque escribe directamente.
+3. Renderer aplica ANSI a los objetos `{ Value; Style }` sin lógica adicional en el prompt.
+4. Variables snapshot se leen directamente desde RAM.
+5. String final entregado a la consola.
 
 ---
 
-## 5. Gestión de Estado: El comando `pws`
+## 5. Gestión de Estado: El Comando `pws`
 
-El comando `pws` actúa como la interfaz de usuario para configurar la terminal en tiempo real y **recompilar el plan de ejecución** al vuelo sin reiniciar.
+Opera exclusivamente sobre el objeto en memoria. Solo sincroniza con `settings.json` cuando el usuario lo solicita explícitamente con `--save`.
 
 | Comando | Acción |
 | :--- | :--- |
-| `pws --activate` | Enciende el motor, guarda el estado y refresca el prompt. |
+| `pws --activate` | Enciende el motor, inicializa el estado en RAM y refresca el prompt. |
 | `pws --disable` | Apaga el motor y muestra un prompt básico de emergencia. |
-| `pws --minimal` | Sobreescribe el `Layout` a su versión reducida, guarda en JSON y **recompila en memoria al instante**. |
-| `pws --full` | Restaura el layout completo con todos los módulos y recompila. |
-| `pws --update` | Escanea el registro silenciosamente buscando software (ej. Python) y guarda en caché. |
+| `pws --minimal` | Sobreescribe `Layout` en memoria y recompila el plan al instante. |
+| `pws --full` | Restaura el layout completo y recompila. |
+| `pws --update` | Dispara un nuevo runspace snapshot para actualizar versiones en caché. |
+| `pws --save` | **Nuevo:** persiste el estado actual en memoria a `settings.json`. |
+| `pws --theme <nombre>` | **Nuevo:** cambia el tema del renderer sin reiniciar la terminal. |
 
 ---
 
-## 6. Extensibilidad: Cómo agregar un módulo
-Para agregar una nueva funcionalidad (ejemplo: mostrar el nivel de batería):
+## 6. Extensibilidad: Cómo Agregar un Módulo
 
-1. Crear `pws-down/modules/battery.ps1`.
-2. Definir la función: `function Get-PwsBattery { ... }`.
+**Módulo Síncrono (ejemplo: nivel de batería en tiempo real)**
+
+1. Crear `modules/sync/battery.ps1`.
+2. Definir: `function Get-PwsBattery { }` retornando `[PSCustomObject]@{ Value = ...; Style = 'battery' }`.
 3. Agregar `"Battery"` al array `Layout` en `settings.json`.
-4. Ejecutar `pws --full` (o abrir una nueva terminal) para obligar al sistema a re-compilar el plan de ejecución y añadir tu módulo.
+4. Ejecutar `pws --full` para recompilar el plan.
+
+**Módulo Snapshot (ejemplo: versión de Node.js)**
+
+1. Crear `modules/snapshot/node.ps1`.
+2. Definir: `function Get-PwsNode { }` que escribe a `$global:PwsSnapshot.Node`.
+3. Agregar `"Node"` al array `SnapshotLayout` en `settings.json`.
+4. El sistema lo lanzará automáticamente en background en el próximo arranque.
 
 ---
 
-> **Nota de Rendimiento:** El uso de `[System.IO.File]::ReadAllText()` dentro de los módulos es preferible sobre `Get-Content` o `git.exe` para mantener la latencia individual del módulo siempre por debajo de **1ms**.
+## 7. Comparativa: Arquitectura Original vs. Mejorada
+
+| Principio Original | Principio Mejorado |
+| :--- | :--- |
+| Módulos homogéneos en un solo plan | Dos clases: síncronos (prompt) vs. snapshot (background) |
+| JSON como fuente de verdad en runtime | JSON solo en frío; estado en RAM como objeto tipado |
+| Módulos retornan strings ANSI | Módulos retornan `{ Value; Style }`; renderer central colorea |
+| Concatenación de strings con `+=` | `StringBuilder` con writes directos. Cero allocations intermedias. |
+| Git escala el árbol en cada prompt | `FileSystemWatcher` invalida caché por evento de directorio |
+| `pws --update` es manual | Runspace snapshot automático y no bloqueante en startup |
+| Sin separación dato/color | `renderer.ps1` como componente independiente y reemplazable |
+
+---
+
+> **Nota de Rendimiento:** Con la incorporación de `StringBuilder` en el renderer y el runspace paralelo para snapshots, el objetivo de latencia del bucle principal baja a **< 0.5ms** en condiciones normales, frente al objetivo original de < 1ms por módulo.

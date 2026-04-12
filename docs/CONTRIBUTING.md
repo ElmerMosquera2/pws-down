@@ -19,22 +19,21 @@ La función `prompt` es el corazón de la experiencia. Cada milisegundo cuenta. 
 
 ```text
 pws-down/
-├── init.ps1           # Solo orquestador (no lógica)
+├── init.ps1           # Solo orquestador (no lógica visual)
+├── renderer.ps1       # Componente visual que aplica secuencias ANSI
 ├── config/
-│   └── settings.json  # Layout y configuración
-└── modules/           # Un archivo por funcionalidad
-    ├── time.ps1       # Get-PwsTime
-    ├── duration.ps1   # Get-PwsDuration
-    ├── path.ps1       # Get-PwsPath
-    ├── git.ps1        # Get-PwsGit
-    └── software.ps1   # Get-PwsSoftware
+│   └── settings.json  # Define Layout síncrono y SnapshotLayout asíncrono
+└── modules/
+    ├── sync/          # Módulos evaluados <0.5ms (time, path, git, duration)
+    └── snapshot/      # Módulos lentos evaluados asíncronamente (software, battery)
 ```
 
 **Contrato del Módulo:**
-- Nombre: `modules/<nombre>.ps1`
+- Nombre: `modules/sync/<nombre>.ps1` o `modules/snapshot/<nombre>.ps1`
 - Función: `Get-Pws<Nombre>` (exactamente igual al archivo)
-- Retorno: `[string]` con formato ANSI o `""` si no hay datos
-- Latencia: Cada función debe ejecutarse en <1ms
+- Retorno (Sync): Un `[PSCustomObject]@{ Value = "..."; Style = "..." }` o `$null`
+- Escritura (Snapshot): Modifica la tabla en RAM vía `$global:PwsSnapshot.<Nombre> = [PSCustomObject]...`
+- Latencia: Los módulos Sync deben fluir instantáneamente. Los Snapshot corren de fondo.
 
 ---
 
@@ -105,15 +104,18 @@ Si encuentras problemas, abre un *Issue* con:
 - ¿Latencia estimada?
 - ¿Qué iconos/colores usaría?
 
-**Ejemplo de nuevo módulo:**
+**Ejemplo de nuevo módulo en Snapshot:**
 ```powershell
-# modules/docker.ps1
+# modules/snapshot/docker.ps1
 function Get-PwsDocker {
-    # Lee de archivo de caché creado por 'pws --update'
+    # La validación costosa no bloquea el prompt <0.5ms al ejecutarse asincrónicamente.
+    # El module lee o espera a docker status localmente.
     if ($global:PwsConfig.Docker.Running) {
-        return "`e[92m🐳 $($global:PwsConfig.Docker.Containers)`e[0m"
+        $envContainers = $($global:PwsConfig.Docker.Containers)
+        $global:PwsSnapshot.Docker = [PSCustomObject]@{ Value = "🐳 $envContainers"; Style = "docker_green" }
+    } else {
+        $global:PwsSnapshot.Docker = $null
     }
-    return ""
 }
 ```
 
@@ -132,8 +134,8 @@ git switch -c feature/nuevo-modulo
 ```
 
 ### 2. Desarrolla tu módulo
-1. Crea `modules/tu-modulo.ps1`
-2. Implementa `Get-PwsTuModulo` siguiendo el contrato
+1. Crea `modules/sync/tu-modulo.ps1` o `snapshot/tu-modulo.ps1`
+2. El módulo debe retornar o escribir un `[PSCustomObject]`
 3. Prueba localmente:
    ```powershell
    . .\init.ps1
@@ -158,11 +160,11 @@ Si tu módulo debe aparecer por defecto:
 
 ### 5. Commit y Push
 ```bash
-git add modules/tu-modulo.ps1 config/settings.json
+git add modules/sync/tu-modulo.ps1 config/settings.json
 git commit -m "feat(tu-modulo): add module for X functionality
 
-- Implement Get-PwsTuModulo with <1ms latency
-- Uses native .NET classes for zero-exe operation
+- Implement Get-PwsTuModulo with PSCustomObject
+- Uses Style system instead of direct ANSI injection
 - Includes color-coded output and dynamic icons"
 
 git push origin feature/nuevo-modulo
@@ -179,11 +181,11 @@ git push origin feature/nuevo-modulo
 
 Antes de enviar tu PR, verifica:
 
-- [ ] El módulo sigue la convención `modules/<nombre>.ps1` → `Get-Pws<Nombre>`
-- [ ] Latencia <1ms (o usa caché si es >1ms)
-- [ ] Zero-Exe: sin llamadas a `.exe` externos
-- [ ] Retorna `""` silenciosamente si no hay datos
-- [ ] Usa colores ANSI consistentes (verde=ok, amarillo=advertencia, rojo=crítico)
+- [ ] El módulo está en `modules/sync/` o `modules/snapshot/`
+- [ ] Retorna o usa objecto `[PSCustomObject]@{ Value = "..."; Style = "..." }`
+- [ ] Cero uso directo de secuencias ANSI (delega al `renderer.ps1`)
+- [ ] Uso exclusivo de variables del `Snapshot` para tareas pesadas
+- [ ] Funciones asiladas con nombres correctos (ej: `Get-PwsCosto`)
 - [ ] Documentación con `<# .SYNOPSIS .DESCRIPTION .NOTES #>`
 - [ ] Probado en Windows 10/11 con PowerShell 7+
 
