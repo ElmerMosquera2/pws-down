@@ -4,14 +4,15 @@
     "Time",
     "Duration",
     "Path",
-    "Git",
+    "Git"
+  ],
+  "SnapshotLayout": [
+    "Software",
+    "Battery"
   ],
   "Symbols": {
     "indicator": "❯❯",
     "error": "✘ ❯❯"
   },
-  "SoftwareCache": {
-    "Python": null,
-    "Cpp": null
-  }
+  "Theme": "default"
 }
