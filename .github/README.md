@@ -28,37 +28,38 @@ Su objetivo es ofrecer un prompt rico en información (Git, tiempos de ejecució
 
 El controlador principal del entorno está integrado nativamente y se invoca con el comando `pws`. Puedes usarlo para gestionar el estado y la cantidad de información de tu terminal en tiempo real:
 
-  * `pws --activate` : Enciende el motor de `pws-down`.
-  * `pws --disable` : Apaga el motor y vuelve a un prompt básico de emergencia.
-  * `pws --minimal` : Cambia el layout a una versión reducida (ideal para concentrarse, oculta hora y software) y recompila el prompt al instante.
-  * `pws --full` : Activa todos los módulos visuales definidos en tu configuración y recompila el prompt.
-  * `pws --update` : Escanea el sistema de forma silenciosa para actualizar la caché de versiones de software instaladas.
+  * `pws -activate` : Enciende el motor de `pws-down` en RAM.
+  * `pws -disable`  : Apaga el motor y vuelve a un prompt básico de emergencia.
+  * `pws -minimal`  : Cambia el layout a una versión reducida (oculta hora y software) y recompila al instante en RAM.
+  * `pws -full`     : Activa todos los módulos visuales configurados.
+  * `pws -update`   : Dispara una recolección en background de la información de snapshots (batería, software).
+  * `pws -theme <N>`: Cambia el tema de colores en vivo (ej. `pws -theme default`).
+  * `pws -reload`   : Recarga los archivos de los módulos sin necesidad de reiniciar la terminal.
+  * `pws -save`     : Persiste tus cambios actuales de memoria en el archivo de configuración `settings.json`.
 
 ## 🧩 Estructura del Proyecto
 
 ```text
 pws-down/
-├── init.ps1           # Motor central: Cargador, Controlador ('pws') y Prompt pre-compilado.
+├── init.ps1           # Motor central: Cargador, Controlador y Prompt pre-compilado en RAM.
+├── renderer.ps1       # Motor visual: Aplica temas y colores a los datos crudos.
 ├── config/
-│   └── settings.json  # Define el orden (Layout), símbolos y estado de los módulos.
-└── modules/           # Directorio de funcionalidades aisladas.
-    ├── time.ps1       # Retorna la hora actual.
-    ├── duration.ps1   # Calcula la latencia del último comando ejecutado.
-    ├── path.ps1       # Formatea el directorio actual.
-    ├── git.ps1        # Lee la rama actual de Git de forma nativa.
-    └── software.ps1   # Muestra versiones cacheadas (Python, C++).
+│   └── settings.json  # Define el orden (Layout/SnapshotLayout) y el Theme visual.
+└── modules/           # Directorios de funcionalidades
+    ├── sync/          # Módulos evaluados en cada prompt (time, path, git, duration).
+    └── snapshot/      # Módulos evaluados en background (battery, software).
 ```
 
 ## ⚙️ Cómo Personalizar y Crear Módulos
 
-La ventaja de la arquitectura de `pws-down` es que añadir nueva información al prompt no requiere modificar el núcleo.
+La ventaja de la Arquitectura de `pws-down` es que separarás la obtención de datos de la parte visual.
 
-1.  Crea un script en la carpeta `modules/`, por ejemplo `bateria.ps1`.
-2.  Define una función que empiece obligatoriamente por el prefijo `Get-Pws` y que retorne un bloque de texto (puede incluir colores ANSI):
+1.  Crea un script en `modules/sync/`, por ejemplo `wifi.ps1`.
+2.  Define una función que empiece obligatoriamente por el prefijo `Get-Pws` y que retorne un `PSCustomObject` con dato y estilo:
     ```powershell
-    function Get-PwsBateria {
-        return "`e[92m🔋 100%`e[0m "
+    function Get-PwsWifi {
+        return [PSCustomObject]@{ Value = "📶 100%"; Style = "battery_full" }
     }
     ```
-3.  Abre `config/settings.json` y añade `"Bateria"` (el nombre exacto sin el prefijo `Get-Pws`) al arreglo `"Layout"` en la posición donde quieras que aparezca.
-4.  Abre una nueva terminal (o ejecuta `pws --full`). El motor detectará, compilará e inyectará tu nuevo módulo automáticamente en el plan de ejecución.
+3.  Abre `config/settings.json` y añade `"Wifi"` al arreglo `"Layout"`.
+4.  Ejecuta `pws -reload` y luego `pws -full`. El motor compilará el módulo de forma instantánea y el `renderer` coloreará el valor mediante el estilo elegido.
